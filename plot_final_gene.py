@@ -1,18 +1,25 @@
 from gtf import GeneTable
 import numpy as np
 from matplotlib import pyplot as plt
+import csv
 
 
 #bamfile_template = ('/home/vighnesh/data/yeast/bamfiles/accepted_hits_%d.bam')
-gtf_file = ('Saccharomyces_cerevisiae.R64-1-1.84.gtf')
-bamfile = 'R1.bam'
-gt = GeneTable(gtf_file, verbose=True, num_flag=True)
 
 
-a = gt.get_pre_mid_post(bamfile, 'I', 'YAR053W')
+bamfile = '/home/vighnesh/data/yili/R1.bam'
+gt = GeneTable(None, verbose=True, convert_roman=True)
 
-b = gt.get_counts_by_location(bamfile, 'I', 110578, 114578)
+total_points = 0
+positive_points = 0
+with open('/home/vighnesh/data/yili/pombe_origin.csv') as csv_file:
+    csv_reader = csv.reader(csv_file)
 
-plt.plot(np.hstack(b))
-
-plt.show()
+    for line in csv_reader:
+        chromosome, start, end = map(int, line)
+        if chromosome == 1:
+            score = gt.get_transition_significance(bamfile, 'I', start, end)
+            if score > 0:
+                positive_points += 1
+            total_points += 1
+            print(positive_points, total_points)

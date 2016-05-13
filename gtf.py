@@ -21,13 +21,14 @@ def samtools_reads_iter(text, gene_start, gene_end):
     for line in text.split('\n'):
         c += 1
         words = line.split('\t')
+        flag = int(words[1])
         if len(words) <= 1:
             continue
 
         alignment_start = int(words[3])
         alignment_length = len(words[9])
 
-        yield alignment_start, alignment_start + alignment_length
+        yield alignment_start, alignment_start + alignment_length, flag
 
 
 def get_samtools_view_command(filename, chromosome, start, end):
@@ -48,31 +49,32 @@ class GeneTable(object):
         self.chromo_map = {}
         # Gene table maps gene name to start and end indices
 
-        with open(filename) as gtf_file:
-            for line in gtf_file:
+        if filename:
+            with open(filename) as gtf_file:
+                for line in gtf_file:
 
-                if line.startswith('#'):
-                    continue
+                    if line.startswith('#'):
+                        continue
 
-                words = line.split()
-                chromosome = words[0]
-                gene_type = words[2]
+                    words = line.split()
+                    chromosome = words[0]
+                    gene_type = words[2]
 
-                if gene_type != interested_type:
-                    continue
+                    if gene_type != interested_type:
+                        continue
 
-                gene_name = words[9].strip(';').strip('"')
+                    gene_name = words[9].strip(';').strip('"')
 
-                if chromosome in self.chromo_map:
-                    gene_map = self.chromo_map[chromosome]
-                else:
-                    gene_map = {}
-                    self.chromo_map[chromosome] = gene_map
+                    if chromosome in self.chromo_map:
+                        gene_map = self.chromo_map[chromosome]
+                    else:
+                        gene_map = {}
+                        self.chromo_map[chromosome] = gene_map
 
-                gene_map = self.chromo_map[chromosome]
-                start = int(words[3])
-                stop = int(words[4])
-                gene_map[gene_name] = (start, stop)
+                        gene_map = self.chromo_map[chromosome]
+                        start = int(words[3])
+                        stop = int(words[4])
+                        gene_map[gene_name] = (start, stop)
 
         if verbose:
             total_genes = sum([len(table) for
@@ -224,14 +226,22 @@ class GeneTable(object):
         if status != 0:
             print('Error with samtools : %s' % output)
         array = np.zeros(end - start)
-        for (s, e) in samtools_reads_iter(output, start, end):
+        for (s, e, flag) in samtools_reads_iter(output, start, end):
+
+                sign = 1
+                if self.pos_neg:
+                    if (flag & 0x10):
+                        sign = -1
+                    else:
+                        sign = 1
+
                 s -= start
                 e -= start
 
                 s = np.clip(s, 0, array.shape[0] - 1)
                 e = np.clip(e, 0, array.shape[0] - 1)
 
-                array[s:e] += 1
+                array[s:e] += sign
         return array
 
     def get_utr_3_5_gene(self, bamfile, chromosome, gene_name, offset=500):
@@ -267,3 +277,31 @@ class GeneTable(object):
     def get_all_gene_names(self, chromosome):
         d = self.chromo_map[chromosome]
         return d.keys()
+
+    def get_transition_significance(self, bamfile, chromosome, start, end):
+        values = self.get_counts_by_location(bamfile, chromosome, start, end)
+
+        mid = len(values)/2
+        left = values[:mid]
+        right = values[mid:]
+
+        up_left = np.sum(left[left > 0])
+        down_right = np.sum(-right[right < 0])
+        down_left = np.sum(-left[left < 0])
+        up_right = np.sum(right[right > 0])
+
+        assert up_left >= 0
+        assert down_right >= 0
+        assert down_left >= 0
+        assert up_right >= 0
+
+        numerator = up_left + down_right
+        denominator = down_left + up_right
+
+        if numerator == 0:
+            return -np.inf
+        if denominator == 0:
+            return np.inf
+        else:
+            significance = np.log2(float(numerator)/float(denominator))
+            return significance
